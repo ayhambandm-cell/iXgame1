@@ -2,6 +2,9 @@ name: Build iXGAME
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -16,214 +19,114 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-
-      # ==============================
-      # 1. Checkout
-      # ==============================
       - name: Checkout iXGAME
         uses: actions/checkout@v4
 
-      # ==============================
-      # 2. Find and extract iXGAME ZIP
-      # ==============================
-      - name: Extract iXGAME ZIP
-        shell: bash
+      - name: Clone RAW Game
         run: |
           set -e
 
-          echo "Searching for iXGAME ZIP..."
+          rm -rf raw
+          git clone --depth 1 \
+            https://github.com/rawgame4/rawgame4.github.io.git \
+            raw
 
-          ZIP=$(find . -maxdepth 2 -type f \
-            \( -iname 'iXGAME*.zip' -o -iname '*iXGAME*.zip' \) \
-            ! -path './.git/*' \
-            | head -n 1)
+          echo "RAW repository:"
+          ls -la raw
 
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: No iXGAME ZIP found."
-            echo "Available files:"
-            find . -maxdepth 3 -type f -print
-            exit 1
-          fi
-
-          echo "Found ZIP:"
-          echo "$ZIP"
-
-          rm -rf build
-          mkdir -p build
-
-          unzip -q "$ZIP" -d build
-
-          echo "ZIP extracted successfully."
-
-          echo "Extracted files:"
-          find build -maxdepth 4 -type f -print
-
-      # ==============================
-      # 3. Download RAW Game project
-      # ==============================
-      - name: Download RAW Game
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf raw raw.zip
-
-          curl -L \
-            --fail \
-            --retry 3 \
-            https://github.com/rawgame4/rawgame4.github.io/archive/refs/heads/main.zip \
-            -o raw.zip
-
-          mkdir -p raw
-
-          unzip -q raw.zip -d raw
-
-          RAW_DIR=$(find raw -mindepth 1 -maxdepth 1 -type d | head -n 1)
-
-          if [ -z "$RAW_DIR" ]; then
-            echo "ERROR: RAW repository was not extracted."
-            exit 1
-          fi
-
-          echo "RAW directory:"
-          echo "$RAW_DIR"
-
-          echo "RAW files:"
-          find "$RAW_DIR" -maxdepth 3 -type f -print
-
-      # ==============================
-      # 4. Build clean website
-      # ==============================
-      - name: Build clean website
-        shell: bash
+      - name: Build website
         run: |
           set -e
 
           rm -rf site
           mkdir -p site
 
-          RAW_DIR=$(find raw -mindepth 1 -maxdepth 1 -type d | head -n 1)
+          echo "Copying selected RAW files..."
 
-          echo "Copying RAW project..."
+          # ملفات الموارد المطلوبة
+          cp -f raw/int64.js site/int64.js
+          cp -f raw/ps4_offsets.js site/ps4_offsets.js
+          cp -f raw/rpc_worker.js site/rpc_worker.js
 
-          cp -a "$RAW_DIR/." site/
+          # سلاسل التشغيل
+          cp -f raw/chain_lapse.js site/chain_lapse.js
+          cp -f raw/chain_poops.js site/chain_poops.js
 
-          # Remove unnecessary RAW interface/documentation
-          rm -rf \
-            site/.git \
-            site/.github \
-            site/README.md \
-            site/LICENSE \
-            site/node_modules \
-            site/.gitignore
+          # Payload
+          cp -f raw/payload.bin site/payload.bin
 
-          echo "Searching iXGAME customization files..."
+          # مجلد patches
+          if [ -d raw/patches ]; then
+            cp -a raw/patches site/patches
+          fi
 
-          INDEX=$(find build -type f -name "index.html" | head -n 1)
-          BANNER=$(find build -type f -iname "*banner*.png" | head -n 1)
-          CACHE=$(find build -type f -name "cache.appcache" | head -n 1)
-
-          if [ -z "$INDEX" ]; then
-            echo "ERROR: index.html was not found inside iXGAME ZIP."
-            echo "ZIP contents:"
-            find build -type f -print
+          # واجهة الموقع
+          if [ -f index.html ]; then
+            cp -f index.html site/index.html
+          elif [ -f raw/index.html ]; then
+            cp -f raw/index.html site/index.html
+          else
+            echo "ERROR: index.html not found"
             exit 1
           fi
 
-          echo "Using:"
-          echo "INDEX = $INDEX"
-          echo "BANNER = $BANNER"
-          echo "CACHE = $CACHE"
+          # صفحات الواجهة
+          for file in run_lapse.html run_poops.html; do
+            if [ -f "$file" ]; then
+              cp -f "$file" "site/$file"
+            elif [ -f "raw/$file" ]; then
+              cp -f "raw/$file" "site/$file"
+            fi
+          done
 
-          # Replace RAW interface with iXGAME interface
-          cp -f "$INDEX" site/index.html
+          echo ""
+          echo "===== FINAL SITE ====="
+          find site -maxdepth 2 -type f | sort
 
-          if [ -n "$BANNER" ]; then
-            cp -f "$BANNER" site/
-          fi
-
-          if [ -n "$CACHE" ]; then
-            cp -f "$CACHE" site/
-          fi
-
-          echo "Final website:"
-          find site -maxdepth 3 -type f -print
-
-      # ==============================
-      # 5. Verify website
-      # ==============================
-      - name: Verify website
-        shell: bash
+      - name: Verify required files
         run: |
           set -e
 
-          if [ ! -f site/index.html ]; then
-            echo "ERROR: site/index.html does not exist."
-            exit 1
+          required=(
+            index.html
+            int64.js
+            ps4_offsets.js
+            rpc_worker.js
+            chain_lapse.js
+            chain_poops.js
+            payload.bin
+          )
+
+          for file in "${required[@]}"; do
+            if [ ! -f "site/$file" ]; then
+              echo "ERROR: Missing $file"
+              exit 1
+            fi
+
+            echo "OK: $file"
+          done
+
+          if [ -d site/patches ]; then
+            echo "OK: patches/"
+          else
+            echo "WARNING: patches/ not found"
           fi
 
-          echo "index.html exists."
-
-          echo "Website size:"
-          du -sh site
-
-          echo "Website files:"
-          find site -maxdepth 2 -type f -print
-
-      # ==============================
-      # 6. Configure GitHub Pages
-      # ==============================
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      # ==============================
-      # 7. Upload Pages artifact
-      # ==============================
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./site
 
-      # ==============================
-      # 8. Deploy
-      # ==============================
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-      # ==============================
-      # 9. Commit generated website
-      # ==============================
-      - name: Commit generated website
-        if: success()
-        shell: bash
-        run: |
-          set -e
-
-          git config user.name "iXGAME Bot"
-          git config user.email "actions@github.com"
-
-          echo "Updating repository with generated website..."
-
-          rm -rf \
-            raw \
-            raw.zip \
-            build
-
-          cp -a site/. .
-
-          rm -rf site
-
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "No repository changes."
-          else
-            git commit -m "Rebuild iXGAME website"
-            git push
-          fi
