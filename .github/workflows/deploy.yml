@@ -1,64 +1,32 @@
-name: Build iXGAME from RAW
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout iXGAME
-        uses: actions/checkout@v4
-
-      - name: Download RAW project
-        run: |
-          curl -L --fail \
-            https://github.com/rawgame4/rawgame4.github.io/archive/refs/heads/main.zip \
-            -o raw.zip
-
-          mkdir raw
-          unzip -q raw.zip -d raw
-
-      - name: Copy RAW files
-        run: |
-          RAW_DIR=$(find raw -mindepth 1 -maxdepth 1 -type d | head -n 1)
-
-          if [ -z "$RAW_DIR" ]; then
-            echo "RAW directory was not found"
-            exit 1
-          fi
-
-          echo "Using RAW directory: $RAW_DIR"
-
-          cp -a "$RAW_DIR/." ./
-
-          rm -rf raw raw.zip
-
       - name: Apply iXGAME customization
         run: |
+          set -e
+          echo "ZIP contents:"
+          unzip -l iXGAME.io-custom-site.zip
           rm -rf custom
-          mkdir custom
-
+          mkdir -p custom
           unzip -q iXGAME.io-custom-site.zip -d custom
-
-          cp -f custom/index.html ./index.html
-          cp -f custom/cache.appcache ./cache.appcache
-          cp -f custom/ixgame-banner.png ./ixgame-banner.png
-
-      - name: Commit built website
-        run: |
-          git config user.name "iXGAME Bot"
-          git config user.email "actions@github.com"
-
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
+          echo "Extracted files:"
+          find custom -type f -maxdepth 5 -print
+          # ابحث عن الملفات مهما كان المجلد الموجود داخل ZIP
+          INDEX=$(find custom -type f -name "index.html" | head -n 1)
+          CACHE=$(find custom -type f -name "cache.appcache" | head -n 1)
+          BANNER=$(find custom -type f -name "ixgame-banner.png" | head -n 1)
+          # index.html
+          if [ -n "$INDEX" ]; then
+            cp -f "$INDEX" ./index.html
+            echo "index.html copied"
           else
-            git commit -m "Build iXGAME site from RAW"
-            git push
+            echo "ERROR: index.html was not found inside ZIP"
+            exit 1
+          fi
+          # cache.appcache اختياري
+          if [ -n "$CACHE" ]; then
+            cp -f "$CACHE" ./cache.appcache
+            echo "cache.appcache copied"
+          fi
+          # صورة البانر اختيارية
+          if [ -n "$BANNER" ]; then
+            cp -f "$BANNER" ./ixgame-banner.png
+            echo "ixgame-banner.png copied"
           fi
