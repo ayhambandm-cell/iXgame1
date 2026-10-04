@@ -1,132 +1,124 @@
-name: Build iXGAME
+name: Sync RAW + iXGAME
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout iXGAME
+      - name: Checkout iXGAME repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Clone RAW Game
+      - name: Download RAW
         run: |
           set -e
 
-          rm -rf raw
-          git clone --depth 1 \
-            https://github.com/rawgame4/rawgame4.github.io.git \
-            raw
+          rm -rf raw raw.zip
 
-          echo "RAW repository:"
-          ls -la raw
+          curl -L --fail --retry 3 \
+            https://github.com/rawgame4/rawgame4.github.io/archive/refs/heads/main.zip \
+            -o raw.zip
 
-      - name: Build website
+          mkdir raw
+          unzip -q raw.zip -d raw
+
+          RAW_DIR=$(find raw -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+          echo "RAW_DIR=$RAW_DIR" >> "$GITHUB_ENV"
+
+      - name: Save iXGAME interface
         run: |
           set -e
 
-          rm -rf site
-          mkdir -p site
+          mkdir -p /tmp/ixgame
 
-          echo "Copying selected RAW files..."
-
-          # ملفات الموارد المطلوبة
-          cp -f raw/int64.js site/int64.js
-          cp -f raw/ps4_offsets.js site/ps4_offsets.js
-          cp -f raw/rpc_worker.js site/rpc_worker.js
-
-          # سلاسل التشغيل
-          cp -f raw/chain_lapse.js site/chain_lapse.js
-          cp -f raw/chain_poops.js site/chain_poops.js
-
-          # Payload
-          cp -f raw/payload.bin site/payload.bin
-
-          # مجلد patches
-          if [ -d raw/patches ]; then
-            cp -a raw/patches site/patches
+          # احفظ واجهة iXGAME الموجودة في المستودع
+          if [ -f index.html ]; then
+            cp index.html /tmp/ixgame/index.html
           fi
 
-          # واجهة الموقع
-          if [ -f index.html ]; then
-            cp -f index.html site/index.html
-          elif [ -f raw/index.html ]; then
-            cp -f raw/index.html site/index.html
+          # احفظ ملفات CSS/JS والصور الخاصة بواجهة iXGAME
+          find . -maxdepth 2 -type f \
+            \( -name "*.css" -o -name "*.png" -o -name "*.jpg" \
+            -o -name "*.jpeg" -o -name "*.webp" -o -name "*.gif" \
+            -o -name "*.svg" \) \
+            -not -path "./.git/*" \
+            -not -path "./raw/*" \
+            -exec cp -f {} /tmp/ixgame/ \; || true
+
+      - name: Update repository from RAW
+        run: |
+          set -e
+
+          echo "Updating repository..."
+
+          # لا نحذف .git أو مجلد workflow
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name ".github" \
+            ! -name "raw" \
+            ! -name "raw.zip" \
+            -exec rm -rf {} +
+
+          # نسخ ملفات RAW العامة إلى جذر المستودع
+          # مع استبعاد واجهة RAW القديمة.
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='index.html' \
+            --exclude='run_lapse.html' \
+            --exclude='run_poops.html' \
+            --exclude='README.md' \
+            "$RAW_DIR"/ ./
+
+      - name: Restore iXGAME interface
+        run: |
+          set -e
+
+          if [ -f /tmp/ixgame/index.html ]; then
+            cp -f /tmp/ixgame/index.html ./index.html
           else
-            echo "ERROR: index.html not found"
+            echo "ERROR: iXGAME index.html was not found."
             exit 1
           fi
 
-          # صفحات الواجهة
-          for file in run_lapse.html run_poops.html; do
-            if [ -f "$file" ]; then
-              cp -f "$file" "site/$file"
-            elif [ -f "raw/$file" ]; then
-              cp -f "raw/$file" "site/$file"
+          # استعادة موارد واجهة iXGAME
+          for file in /tmp/ixgame/*; do
+            [ -f "$file" ] || continue
+
+            name=$(basename "$file")
+
+            if [ "$name" != "index.html" ]; then
+              cp -f "$file" "./$name"
             fi
           done
 
-          echo ""
-          echo "===== FINAL SITE ====="
-          find site -maxdepth 2 -type f | sort
+      - name: Show final repository
+        run: |
+          echo "===== FINAL REPOSITORY ====="
+          find . -maxdepth 2 -type f \
+            -not -path "./.git/*" \
+            | sort
 
-      - name: Verify required files
+      - name: Commit and push
         run: |
           set -e
 
-          required=(
-            index.html
-            int64.js
-            ps4_offsets.js
-            rpc_worker.js
-            chain_lapse.js
-            chain_poops.js
-            payload.bin
-          )
+          git config user.name "iXGAME Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          for file in "${required[@]}"; do
-            if [ ! -f "site/$file" ]; then
-              echo "ERROR: Missing $file"
-              exit 1
-            fi
+          git add -A
 
-            echo "OK: $file"
-          done
-
-          if [ -d site/patches ]; then
-            echo "OK: patches/"
+          if git diff --cached --quiet; then
+            echo "Nothing changed."
           else
-            echo "WARNING: patches/ not found"
+            git commit -m "Sync RAW resources and update iXGAME interface"
+            git push origin HEAD:main
           fi
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
