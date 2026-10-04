@@ -1,76 +1,58 @@
-name: iXGAME Deploy
+name: Build iXGAME from RAW
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "iXGAME-from-scratch.zip"
-      - ".github/workflows/deploy.yml"
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: github-pages
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout iXGAME
         uses: actions/checkout@v4
 
-      - name: Extract iXGAME
+      - name: Download RAW project
         run: |
-          set -e
+          curl -L \
+            https://github.com/rawgame4/rawgame4.github.io/archive/refs/heads/main.zip \
+            -o raw.zip
+          mkdir raw
+          unzip -q raw.zip -d raw
 
-          rm -rf build
-          mkdir build
+      - name: Extract RAW files
+        run: |
+          RAW_DIR=$(find raw -maxdepth 1 -type d -name 'rawgame4.github.io-*' | head -n 1)
 
-          unzip -q "iXGAME-from-scratch.zip" -d build
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '.github' \
+            ! -name 'iXGAME.io-custom-site.zip' \
+            -exec rm -rf {} +
 
-          INDEX=$(find build -type f -name "index.html" -print -quit)
+          cp -a "$RAW_DIR/." .
 
-          if [ -z "$INDEX" ]; then
-            echo "ERROR: index.html not found"
-            exit 1
+      - name: Extract iXGAME customization
+        run: |
+          mkdir custom
+          unzip -q iXGAME.io-custom-site.zip -d custom
+
+          cp -f custom/index.html ./index.html
+          cp -f custom/cache.appcache ./cache.appcache
+          cp -f custom/ixgame-banner.png ./ixgame-banner.png
+
+      - name: Commit built website
+        run: |
+          git config user.name "iXGAME Bot"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Build iXGAME site from RAW"
+            git push
           fi
-
-          DIR=$(dirname "$INDEX")
-
-          mkdir final
-
-          cp -a "$DIR"/. final/
-
-          echo "Final website:"
-          find final -type f
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload website
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./final
-
-  deploy:
-    needs: build
-
-    runs-on: ubuntu-latest
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    permissions:
-      pages: write
-      id-token: write
-
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
