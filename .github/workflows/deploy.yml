@@ -16,27 +16,33 @@ jobs:
 
       - name: Download RAW project
         run: |
-          curl -L \
+          curl -L --fail \
             https://github.com/rawgame4/rawgame4.github.io/archive/refs/heads/main.zip \
             -o raw.zip
+
           mkdir raw
           unzip -q raw.zip -d raw
 
-      - name: Extract RAW files
+      - name: Copy RAW files
         run: |
-          RAW_DIR=$(find raw -maxdepth 1 -type d -name 'rawgame4.github.io-*' | head -n 1)
+          RAW_DIR=$(find raw -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
-          find . -mindepth 1 -maxdepth 1 \
-            ! -name '.git' \
-            ! -name '.github' \
-            ! -name 'iXGAME.io-custom-site.zip' \
-            -exec rm -rf {} +
+          if [ -z "$RAW_DIR" ]; then
+            echo "RAW directory was not found"
+            exit 1
+          fi
 
-          cp -a "$RAW_DIR/." .
+          echo "Using RAW directory: $RAW_DIR"
 
-      - name: Extract iXGAME customization
+          cp -a "$RAW_DIR/." ./
+
+          rm -rf raw raw.zip
+
+      - name: Apply iXGAME customization
         run: |
+          rm -rf custom
           mkdir custom
+
           unzip -q iXGAME.io-custom-site.zip -d custom
 
           cp -f custom/index.html ./index.html
