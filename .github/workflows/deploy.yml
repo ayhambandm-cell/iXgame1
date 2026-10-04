@@ -1,32 +1,87 @@
-      - name: Apply iXGAME customization
+name: Build iXGAME
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout iXGAME
+        uses: actions/checkout@v4
+
+      - name: Extract iXGAME ZIP
         run: |
           set -e
-          echo "ZIP contents:"
-          unzip -l iXGAME.io-custom-site.zip
-          rm -rf custom
-          mkdir -p custom
-          unzip -q iXGAME.io-custom-site.zip -d custom
-          echo "Extracted files:"
-          find custom -type f -maxdepth 5 -print
-          # ابحث عن الملفات مهما كان المجلد الموجود داخل ZIP
-          INDEX=$(find custom -type f -name "index.html" | head -n 1)
-          CACHE=$(find custom -type f -name "cache.appcache" | head -n 1)
-          BANNER=$(find custom -type f -name "ixgame-banner.png" | head -n 1)
-          # index.html
-          if [ -n "$INDEX" ]; then
-            cp -f "$INDEX" ./index.html
-            echo "index.html copied"
-          else
-            echo "ERROR: index.html was not found inside ZIP"
+
+          rm -rf build
+          mkdir -p build
+
+          ZIP="iXGAME-from-scratch.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP not found"
             exit 1
           fi
-          # cache.appcache اختياري
-          if [ -n "$CACHE" ]; then
-            cp -f "$CACHE" ./cache.appcache
-            echo "cache.appcache copied"
+
+          unzip -q "$ZIP" -d build
+
+          echo "ZIP extracted."
+
+      - name: Get RawGame static resources
+        run: |
+          set -e
+
+          rm -rf rawgame
+          git clone --depth 1 \
+            https://github.com/rawgame4/rawgame4.github.io.git \
+            rawgame
+
+          mkdir -p build/assets/rawgame
+
+          # Static image/resource only.
+          # RawGame interface and executable exploit files are not copied.
+          if [ -f rawgame/logo_raw.png ]; then
+            cp rawgame/logo_raw.png build/assets/rawgame/
           fi
-          # صورة البانر اختيارية
-          if [ -n "$BANNER" ]; then
-            cp -f "$BANNER" ./ixgame-banner.png
-            echo "ixgame-banner.png copied"
-          fi
+
+          echo "Static resources copied."
+
+      - name: Verify new website
+        run: |
+          set -e
+
+          test -f build/index.html
+
+          echo "=============================="
+          echo "iXGAME website ready"
+          echo "=============================="
+
+          find build -maxdepth 3 -type f | sort
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
