@@ -1,0 +1,76 @@
+name: iXGAME Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "iXGAME-from-scratch.zip"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract iXGAME
+        run: |
+          set -e
+
+          rm -rf build
+          mkdir build
+
+          unzip -q "iXGAME-from-scratch.zip" -d build
+
+          INDEX=$(find build -type f -name "index.html" -print -quit)
+
+          if [ -z "$INDEX" ]; then
+            echo "ERROR: index.html not found"
+            exit 1
+          fi
+
+          DIR=$(dirname "$INDEX")
+
+          mkdir final
+
+          cp -a "$DIR"/. final/
+
+          echo "Final website:"
+          find final -type f
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./final
+
+  deploy:
+    needs: build
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
